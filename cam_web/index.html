@@ -1,0 +1,317 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Eel Robot Camera</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:16px}
+    .wrap{max-width:1100px;margin:0 auto}
+    #player{width:100%;height:480px;background:#000;border-radius:8px;border:1px solid #ddd}
+    .controls{margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    button{padding:10px 14px;border-radius:8px;border:1px solid #ccc;cursor:pointer}
+    .start{background:#e8f7ea}.stop{background:#fde8e8}
+    .status{margin-left:auto}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid #eee;padding:8px;font-size:.95rem} th{background:#fafafa;text-align:left}
+    .rowbtn{padding:6px 10px;border-radius:6px}.danger{background:#ffeaea}
+    .small{font-size:.85rem;opacity:.9}
+    .stream-info{margin-top:8px;font-size:.85rem;color:#666}
+    .sensor-section{margin-top:24px;padding:16px;background:#f8f9fa;border-radius:8px;border:1px solid #e0e0e0}
+    .sensor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:12px}
+    .sensor-card{padding:12px;background:white;border-radius:6px;border:1px solid #e0e0e0}
+    .sensor-card h3{margin:0 0 8px 0;font-size:1rem}
+    .device-list{list-style:none;padding:0;margin:8px 0 0 0}
+    .device-item{padding:6px 0;display:flex;justify-content:space-between;border-bottom:1px solid #f0f0f0}
+    .device-item:last-child{border-bottom:none}
+    .status-badge{padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:600}
+    .status-online{background:#e8f7ea;color:#137a1d}
+    .status-offline{background:#ffeaea;color:#c21f1f}
+    .sensor-reading{display:flex;justify-content:space-between;padding:4px 0;font-size:.9rem}
+    .sensor-value{font-weight:600;font-family:monospace}
+    .servo-controls{display:flex;gap:8px;margin-top:8px;align-items:center}
+    .servo-status-text{margin-left:auto;font-weight:600}
+    .section-divider{margin-top:8px;padding-top:8px;border-top:1px solid #e0e0e0}
+    .highlight-value{background:#fff3cd;padding:2px 6px;border-radius:3px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Eel Robot Camera</h1>
+
+  <!-- Camera Stream -->
+  <iframe 
+    src="http://199.168.1.203:8889/cam" 
+    style="width:100%;height:480px;border:none;border-radius:8px;background:#000;"
+    allowfullscreen>
+  </iframe>
+  <div class="stream-info">Stream: WebRTC via MediaMTX | <span id="streamStatus" style="color:#137a1d">Connected</span></div>
+
+  <div class="controls">
+    <button class="start" id="startBtn">Start recording</button>
+    <button class="stop" id="stopBtn">Stop recording</button>
+    <button id="refreshList">Refresh list</button>
+    <span class="status" id="statusText">Status: —</span>
+  </div>
+
+
+  <!-- Sensor Status Section -->
+  <div class="sensor-section">
+    <h2 style="margin-top:0">Sensor Status</h2>
+    <div class="sensor-grid">
+      <!-- I2C Devices -->
+      <div class="sensor-card">
+        <h3>I2C Devices</h3>
+        <ul class="device-list" id="i2cDevices">
+          <li class="small">Scanning...</li>
+        </ul>
+      </div>
+
+      <!-- IMU Data -->
+      <div class="sensor-card">
+        <h3>IMU (ICM-20948)</h3>
+        <div style="font-size:.85rem;color:#666;margin-bottom:4px">Accelerometer (g)</div>
+        <div class="sensor-reading">
+          <span>Accel X:</span>
+          <span class="sensor-value" id="accelX">—</span>
+        </div>
+        <div class="sensor-reading">
+          <span>Accel Y:</span>
+          <span class="sensor-value" id="accelY">—</span>
+        </div>
+        <div class="sensor-reading">
+          <span>Accel Z:</span>
+          <span class="sensor-value" id="accelZ">—</span>
+        </div>
+        
+        <div style="font-size:.85rem;color:#666;margin:8px 0 4px 0">Gyroscope (°/s)</div>
+        <div class="sensor-reading">
+          <span>Gyro X:</span>
+          <span class="sensor-value" id="gyroX">—</span>
+        </div>
+        <div class="sensor-reading">
+          <span>Gyro Y:</span>
+          <span class="sensor-value" id="gyroY">—</span>
+        </div>
+        <div class="sensor-reading">
+          <span>Gyro Z:</span>
+          <span class="sensor-value" id="gyroZ">—</span>
+        </div>
+        
+        <div class="section-divider">
+          <div style="font-size:.85rem;color:#666;margin-bottom:4px"><strong>Complementary Filter Angles</strong></div>
+          <div class="sensor-reading">
+            <span><strong>Roll (X-axis):</strong></span>
+            <span class="sensor-value highlight-value" id="compAngleX">—</span>
+          </div>
+          <div class="sensor-reading">
+            <span><strong>Pitch (Y-axis):</strong></span>
+            <span class="sensor-value highlight-value" id="compAngleY">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bend Sensor -->
+      <div class="sensor-card">
+        <h3>Bidirectional Bend Sensor</h3>
+        <div class="sensor-reading">
+          <span><strong>Bend Angle:</strong></span>
+          <span class="sensor-value highlight-value" id="bendAngle">—</span>
+        </div>
+        <div class="section-divider">
+          <div style="font-size:.85rem;color:#666;margin-bottom:4px">Raw Voltages</div>
+          <div class="sensor-reading">
+            <span>Differential (A0-A1):</span>
+            <span class="sensor-value" id="bendVoltage">—</span>
+          </div>
+          <div class="sensor-reading">
+            <span>A0:</span>
+            <span class="sensor-value" id="bendVoltageA0">—</span>
+          </div>
+          <div class="sensor-reading">
+            <span>A1:</span>
+            <span class="sensor-value" id="bendVoltageA1">—</span>
+          </div>
+        </div>
+        <div style="margin-top:8px;padding:8px;background:#f0f0f0;border-radius:4px;font-size:.8rem">
+          <div>+ angle = bend right</div>
+          <div>- angle = bend left</div>
+          <div>Range: -90° to +90°</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Servo Control Section -->
+  <div class="sensor-section">
+    <h2 style="margin-top:0">Servo Control</h2>
+    <div class="servo-controls">
+      <button class="start" id="servoStartBtn">Start Sweep</button>
+      <button class="stop" id="servoStopBtn">Stop Sweep</button>
+      <span class="servo-status-text" id="servoStatus">Servo: —</span>
+    </div>
+  </div>
+
+  <h2>Recordings</h2>
+  <span class="small">Folder: <code>/home/robot/recordings</code></span>
+  <table>
+    <thead><tr><th>File</th><th>Size (MB)</th><th>Modified</th><th>Actions</th></tr></thead>
+    <tbody id="filesBody"><tr><td colspan="4">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const TOKEN = "super-secret-token";
+
+// Debouncing flags
+let updateInProgress = false;
+let servoUpdateInProgress = false;
+
+
+
+async function api(path, method="GET", body=null){
+  let url = API_BASE + path;
+  if (method==="GET") url += (path.includes("?")?"&":"?") + "_ts=" + Date.now();
+  const opts = { method, headers:{"X-API-Token":TOKEN}, cache:"no-store" };
+  if (body){ opts.headers["Content-Type"]="application/json"; opts.body = JSON.stringify(body); }
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// Sensor data update with debouncing
+async function updateSensors(){
+  if (updateInProgress) return;  // Skip if already updating
+  updateInProgress = true;
+  
+  try{
+    const data = await api("/api/sensors");
+    
+    // Update I2C devices
+    const deviceList = document.getElementById("i2cDevices");
+    deviceList.innerHTML = "";
+    for (const [addr, info] of Object.entries(data.i2c_devices)){
+      const li = document.createElement("li");
+      li.className = "device-item";
+      const statusClass = info.status === "online" ? "status-online" : "status-offline";
+      li.innerHTML = `
+        <span>${info.name} <span class="small">(${addr})</span></span>
+        <span class="status-badge ${statusClass}">${info.status}</span>
+      `;
+      deviceList.appendChild(li);
+    }
+    
+    // Update IMU - Accelerometer
+    document.getElementById("accelX").textContent = data.imu.accel[0] + " g";
+    document.getElementById("accelY").textContent = data.imu.accel[1] + " g";
+    document.getElementById("accelZ").textContent = data.imu.accel[2] + " g";
+    
+    // Update IMU - Gyroscope
+    document.getElementById("gyroX").textContent = data.imu.gyro[0] + " °/s";
+    document.getElementById("gyroY").textContent = data.imu.gyro[1] + " °/s";
+    document.getElementById("gyroZ").textContent = data.imu.gyro[2] + " °/s";
+    
+    // Update IMU - Complementary Filter Angles
+    document.getElementById("compAngleX").textContent = data.imu.comp_angle_x + "°";
+    document.getElementById("compAngleY").textContent = data.imu.comp_angle_y + "°";
+    
+    // Update bend sensor
+    document.getElementById("bendAngle").textContent = data.bend_sensor.angle + "°";
+    document.getElementById("bendVoltage").textContent = data.bend_sensor.voltage + " V";
+    document.getElementById("bendVoltageA0").textContent = data.bend_sensor.voltage_a0 + " V";
+    document.getElementById("bendVoltageA1").textContent = data.bend_sensor.voltage_a1 + " V";
+    
+  }catch(e){
+    console.error("Sensor update failed:", e);
+  } finally {
+    updateInProgress = false;
+  }
+}
+
+// Servo status update with debouncing
+async function updateServoStatus(){
+  if (servoUpdateInProgress) return;  // Skip if already updating
+  servoUpdateInProgress = true;
+  
+  try{
+    const data = await api("/api/servo/status");
+    const statusEl = document.getElementById("servoStatus");
+    statusEl.textContent = `Servo: ${data.running ? 'SWEEPING (' + data.angle + '°)' : 'STOPPED'}`;
+    statusEl.style.color = data.running ? "#137a1d" : "#666";
+  }catch(e){
+    console.error("Servo status update failed:", e);
+  } finally {
+    servoUpdateInProgress = false;
+  }
+}
+
+// Servo controls
+document.getElementById("servoStartBtn").onclick = async ()=>{ 
+  try{ await api("/api/servo/start","POST"); }
+  catch(e){ alert("Servo start failed"); } 
+  updateServoStatus(); 
+};
+
+document.getElementById("servoStopBtn").onclick = async ()=>{ 
+  try{ await api("/api/servo/stop","POST"); }
+  catch(e){ alert("Servo stop failed"); } 
+  updateServoStatus(); 
+};
+
+function renderFiles(files){
+  const tb = document.getElementById("filesBody");
+  if (!files.length){ tb.innerHTML = `<tr><td colspan="4" class="small">No recordings found.</td></tr>`; return; }
+  tb.innerHTML = "";
+  for (const f of files){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${f.name}</td><td>${f.size_mb}</td><td>${f.mtime}</td>
+      <td>
+        <button class="rowbtn" onclick="downloadFile('${encodeURIComponent(f.name)}')">Download</button>
+        <button class="rowbtn danger" onclick="deleteFile('${encodeURIComponent(f.name)}')">Delete</button>
+      </td>`;
+    tb.appendChild(tr);
+  }
+}
+async function refreshFiles(){ try{ renderFiles((await api("/api/files")).files); }
+catch{ document.getElementById("filesBody").innerHTML = `<tr><td colspan="4" class="small">Error listing files.</td></tr>`; } }
+
+async function downloadFile(nameEnc){
+  const res = await fetch(`${API_BASE}/api/files/download/${nameEnc}?_ts=${Date.now()}`, {headers:{"X-API-Token":TOKEN}, cache:"no-store"});
+  if (!res.ok) return alert("Download failed.");
+  const blob = await res.blob(), a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = decodeURIComponent(nameEnc);
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+}
+async function deleteFile(nameEnc){
+  const name = decodeURIComponent(nameEnc);
+  if (!confirm(`Delete ${name}?`)) return;
+  try{ await api("/api/files/delete","POST",{name}); refreshFiles(); } catch{ alert("Delete failed."); }
+}
+
+async function refreshStatus(){
+  try{
+    const j = await api("/api/record/status");
+    const s = document.getElementById("statusText");
+    s.textContent = "Status: " + (j.active ? "RECORDING" : "IDLE");
+    s.style.color = j.active ? "#137a1d" : "#c21f1f";
+  }catch{ document.getElementById("statusText").textContent = "Status: connection error"; }
+}
+
+// Camera recording controls
+document.getElementById("startBtn").onclick = async ()=>{ try{ await api("/api/record/start","POST"); }catch(e){ alert("Start failed"); } refreshStatus(); };
+document.getElementById("stopBtn").onclick  = async ()=>{ try{ await api("/api/record/stop","POST");  }catch(e){ alert("Stop failed"); }  refreshStatus(); refreshFiles(); };
+document.getElementById("refreshList").onclick = refreshFiles;
+
+// SLOWER UPDATE INTERVALS - prevents GUI freezing
+refreshStatus(); 
+refreshFiles(); 
+setInterval(refreshStatus, 5000);           // Recording status: 5 seconds
+updateSensors(); 
+setInterval(updateSensors, 1000);           // Sensors: 1 second (was 200ms)
+updateServoStatus(); 
+setInterval(updateServoStatus, 2000);       // Servo: 2 seconds (was 500ms)
+</script>
+</body>
+</html>

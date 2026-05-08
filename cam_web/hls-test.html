@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HLS Camera Test</title>
+</head>
+<body>
+    <h1>Camera Stream (HLS)</h1>
+    <video id="video" controls autoplay muted style="width: 100%; max-width: 1280px;"></video>
+    
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const src = 'http://192.168.1.254:8888/cam/index.m3u8';
+        
+        if (Hls.isSupported()) {
+            const hls = new Hls();
+            hls.loadSource(src);
+            hls.attachMedia(video);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = src;
+        }
+    </script>
+</body>
+</html>

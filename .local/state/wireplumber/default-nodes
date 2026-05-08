@@ -1,0 +1,3 @@
+[default-nodes]
+default.configured.audio.sink=alsa_output.platform-20902000.hdmi.hdmi-stereo
+default.configured.audio.sink.0=alsa_output.platform-20902000.hdmi.hdmi-stereo

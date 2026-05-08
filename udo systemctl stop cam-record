@@ -1,0 +1,10 @@
+[0;1;32m●[0m cam-record.service - Record RTSP cam to rolling files
+     Loaded: loaded (]8;;file://raspberrypi/etc/systemd/system/cam-record.service/etc/systemd/system/cam-record.service]8;;; [0;1;38;5;185mdisabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;32mactive (running)[0m since Mon 2025-09-29 14:41:25 EDT; 3s ago
+   Main PID: 2607 (ffmpeg)
+      Tasks: 1[0;38;5;245m (limit: 382)[0m
+        CPU: 2.821s
+     CGroup: /system.slice/cam-record.service
+             └─[0;38;5;245m2607 ffmpeg -rtsp_transport tcp -i rtsp://127.0.0.1:8554/cam -c copy -f segment -segment_time 300 -reset_timestamps 1 /home/robot/recordings/cam_%Y%m%d_%H%M%S.mkv[0m
+
+Sep 29 14:41:25 raspberrypi systemd[1]: Started cam-record.service - Record RTSP cam to rolling files.

@@ -1,0 +1,49 @@
+Xsession: X session started for robot at Thu Oct  2 06:55:03 PM EDT 2025
+dbus-update-activation-environment: setting DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+xrdb: Can't open display ''
+xhost:  unable to open display ""
+dbus-update-activation-environment: setting USER=robot
+dbus-update-activation-environment: setting LANGUAGE=en_US.UTF-8
+dbus-update-activation-environment: setting TEXTDOMAIN=Linux-PAM
+dbus-update-activation-environment: setting XDG_SESSION_TYPE=wayland
+dbus-update-activation-environment: setting HOME=/home/robot
+dbus-update-activation-environment: setting DESKTOP_SESSION=LXDE-pi-labwc
+dbus-update-activation-environment: setting XDG_SEAT_PATH=/org/freedesktop/DisplayManager/Seat0
+dbus-update-activation-environment: setting DPKG_DEB_THREADS_MAX=1
+dbus-update-activation-environment: setting DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+dbus-update-activation-environment: setting LOGNAME=robot
+dbus-update-activation-environment: setting XDG_SESSION_CLASS=user
+dbus-update-activation-environment: setting PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games
+dbus-update-activation-environment: setting XDG_SESSION_PATH=/org/freedesktop/DisplayManager/Session1
+dbus-update-activation-environment: setting XDG_RUNTIME_DIR=/run/user/1000
+dbus-update-activation-environment: setting LANG=en_US.UTF-8
+dbus-update-activation-environment: setting XDG_SESSION_DESKTOP=LXDE-pi-labwc
+dbus-update-activation-environment: setting XDG_GREETER_DATA_DIR=/var/lib/lightdm/data/robot
+dbus-update-activation-environment: setting SHELL=/bin/bash
+dbus-update-activation-environment: setting GDMSESSION=LXDE-pi-labwc
+dbus-update-activation-environment: setting NO_AT_BRIDGE=1
+dbus-update-activation-environment: setting GPG_AGENT_INFO=/run/user/1000/gnupg/S.gpg-agent:0:1
+dbus-update-activation-environment: setting LC_ALL=en_US.UTF-8
+dbus-update-activation-environment: setting PWD=/home/robot
+no profile matched
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+Failure: No such entity
+
+(polkit-mate-authentication-agent-1:2010): GLib-CRITICAL **: 18:55:53.257: g_variant_new_string: assertion 'string != NULL' failed
+
+(polkit-mate-authentication-agent-1:2010): polkit-mate-1-WARNING **: 18:55:53.307: Failed to register client: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.SessionManager was not provided by any .service files
+** Message: 18:56:15.337: batt: battery 0 not found
+** Message: 18:56:31.349: up: Checking for updates
+** Message: 18:57:35.880: up: Cache updated - comparing versions
+** Message: 19:00:09.960: up: Check complete - 22 updates available
+
+(pcmanfm:2037): Gtk-CRITICAL **: 19:38:24.048: gtk_event_controller_get_propagation_phase: assertion 'GTK_IS_EVENT_CONTROLLER (controller)' failed
+
+(pcmanfm:2037): Gtk-CRITICAL **: 19:38:24.075: gtk_event_controller_get_propagation_phase: assertion 'GTK_IS_EVENT_CONTROLLER (controller)' failed
+Segmentation fault
+no profile matched
+01:07:37.915 [ERROR] [types/wlr_linux_dmabuf_v1.c:1240] Failed to get backend DRM FD
+01:07:46.209 [ERROR] [types/wlr_linux_dmabuf_v1.c:1240] Failed to get backend DRM FD

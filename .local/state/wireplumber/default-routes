@@ -1,0 +1,7 @@
+[default-routes]
+alsa_card.platform-20902000.hdmi:output:hdmi-output-0:channelMap=FL;FR;
+alsa_card.platform-20902000.hdmi:output:hdmi-output-0:channelVolumes=1.0;1.0;
+alsa_card.platform-20902000.hdmi:output:hdmi-output-0:iec958Codecs=
+alsa_card.platform-20902000.hdmi:output:hdmi-output-0:latencyOffsetNsec=0
+alsa_card.platform-20902000.hdmi:profile:off=hdmi-output-0;
+alsa_card.platform-20902000.hdmi:profile:output:hdmi-stereo=hdmi-output-0;
