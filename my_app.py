@@ -1,7 +1,10 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, send_from_directory, abort
 import threading
 import time
 import math
+import os
+import subprocess
+import pathlib
 
 # --- HARDWARE IMPORTS (STRIPPED DOWN) ---
 import board
@@ -11,6 +14,13 @@ from adafruit_motor import servo
 from adafruit_ina219 import INA219
 
 app = Flask(__name__)
+
+REC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recordings")
+TOKEN = "super-secret-token"
+
+def check_auth():
+    if request.headers.get("X-API-Token") != TOKEN:
+        abort(401)
 
 # --- GLOBAL DATA STRUCTURES ---
 # Static values kept so the frontend JS doesn't crash
@@ -127,7 +137,7 @@ thread.start()
 # --- FLASK ROUTES ---
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(HTML_TEMPLATE, rec_dir=REC_DIR)
 
 @app.route('/api/telemetry', methods=['GET'])
 def get_telemetry():
@@ -188,6 +198,56 @@ def send_command():
             return jsonify({"status": "success"})
             
     return jsonify({"status": "error", "message": "Unknown command"}), 400
+
+@app.route('/api/record/status')
+def record_status():
+    check_auth()
+    p = subprocess.run(["systemctl", "is-active", "--quiet", "cam-record"])
+    return jsonify({"active": p.returncode == 0})
+
+@app.route('/api/record/start', methods=['POST'])
+def record_start():
+    check_auth()
+    subprocess.run(["sudo", "systemctl", "start", "cam-record"])
+    return jsonify({"ok": True})
+
+@app.route('/api/record/stop', methods=['POST'])
+def record_stop():
+    check_auth()
+    subprocess.run(["sudo", "systemctl", "stop", "cam-record"])
+    return jsonify({"ok": True})
+
+@app.route('/api/files')
+def list_files():
+    check_auth()
+    pathlib.Path(REC_DIR).mkdir(parents=True, exist_ok=True)
+    items = []
+    for name in sorted(os.listdir(REC_DIR), reverse=True):
+        p = os.path.join(REC_DIR, name)
+        if os.path.isfile(p) and not name.startswith('.'):
+            st = os.stat(p)
+            items.append({
+                "name": name,
+                "size_mb": round(st.st_size / 1024 / 1024, 2),
+                "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))
+            })
+    return jsonify({"files": items})
+
+@app.route('/api/files/download/<path:name>')
+def download_file(name):
+    check_auth()
+    return send_from_directory(REC_DIR, name, as_attachment=True)
+
+@app.route('/api/files/delete', methods=['POST'])
+def delete_file():
+    check_auth()
+    name = request.json.get("name", "")
+    p = os.path.join(REC_DIR, name)
+    if not os.path.abspath(p).startswith(os.path.abspath(REC_DIR)):
+        abort(400)
+    if os.path.exists(p):
+        os.remove(p)
+    return jsonify({"ok": True})
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -331,17 +391,24 @@ HTML_TEMPLATE = """
 
         <div class="card">
             <h2>Forward Camera Feed</h2>
-            <div class="camera-placeholder">
-                <div style="text-align: center;">
-                    <div style="font-size: 32px; color: #555; margin-bottom: 10px;">&#128247;</div>
-                    <span class="camera-text">CAMERA OFFLINE</span>
-                </div>
-            </div>
-            
+            <iframe
+                id="camStream"
+                style="width:100%;height:300px;border:none;border-radius:4px;background:#000;"
+                allowfullscreen>
+            </iframe>
+            <div style="font-size:.85rem;color:#666;margin-bottom:8px;">Stream: WebRTC via MediaMTX | <span id="streamStatus" style="color:#137a1d">Connected</span></div>
+
             <div style="display: flex; gap: 10px; margin-bottom: 25px;">
-                <button id="record_btn" style="flex: 1; border-color: #A00000; color: #A00000; font-weight: bold;" onclick="toggleRecording()">&#9679; Start Recording</button>
-                <button id="save_vid_btn" style="flex: 1;" disabled>&#128190; Save Video</button>
+                <button id="record_btn" style="flex: 1; border-color: #A00000; color: #A00000; font-weight: bold;" onclick="startRecording()">&#9679; Start Recording</button>
+                <button id="stop_btn" style="flex: 1; border-color: #A00000; color: #A00000; font-weight: bold;" onclick="stopRecording()">&#9632; Stop Recording</button>
+                <span id="statusText" style="margin-left:auto; font-family:monospace; align-self:center; color:#c21f1f;">Status: IDLE</span>
             </div>
+            <h2 style="margin-top:20px;">Recordings <button onclick="refreshFiles()" style="font-size:12px; padding:3px 8px; margin-left:10px;">Refresh List</button></h2>
+            <span style="font-size:.85rem; font-family:monospace;">Folder: <code>{{ rec_dir }}</code></span>
+            <table style="margin-top:8px;">
+                <thead><tr><th style="text-align:left;">File</th><th>Size (MB)</th><th>Modified</th><th>Actions</th></tr></thead>
+                <tbody id="filesBody"><tr><td colspan="4">Loading...</td></tr></tbody>
+            </table>
 
             <h2>Anguilliform Kinematics (Eq. 2)</h2>
             <div class="control-group">
@@ -766,28 +833,86 @@ HTML_TEMPLATE = """
 
         // --- CAMERA FUNCTIONS ---
         let isRecording = false;
-        function toggleRecording() {
-            isRecording = !isRecording;
-            let recBtn = document.getElementById('record_btn');
-            let saveBtn = document.getElementById('save_vid_btn');
-            
-            if (isRecording) {
-                recBtn.innerHTML = '&#9632; Stop Recording';
-                recBtn.style.backgroundColor = '#FFD0D0';
-                saveBtn.disabled = true;
-            } else {
-                recBtn.innerHTML = '&#9679; Start Recording';
-                recBtn.style.backgroundColor = '#E8E8E8';
-                saveBtn.disabled = false;
+        const API_BASE = window.location.origin;
+        const TOKEN = "super-secret-token";
+
+        async function api(path, method="GET", body=null){
+            let url = API_BASE + path;
+            if (method==="GET") url += (path.includes("?")?"&":"?") + "_ts=" + Date.now();
+            const opts = { method, headers:{"X-API-Token":TOKEN}, cache:"no-store" };
+            if (body){ opts.headers["Content-Type"]="application/json"; opts.body = JSON.stringify(body); }
+            const r = await fetch(url, opts);
+            if (!r.ok) throw new Error(await r.text());
+            return r.json();
+        }
+
+        function renderFiles(files){
+            const tb = document.getElementById("filesBody");
+            if (!files.length){ tb.innerHTML = `<tr><td colspan="4" style="font-size:.85rem;">No recordings found.</td></tr>`; return; }
+            tb.innerHTML = "";
+            for (const f of files){
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td style="text-align:left;">${f.name}</td><td>${f.size_mb}</td><td>${f.mtime}</td>
+                    <td>
+                        <button onclick="downloadFile('${encodeURIComponent(f.name)}')">Download</button>
+                        <button style="background:#ffeaea;" onclick="deleteFile('${encodeURIComponent(f.name)}')">Delete</button>
+                    </td>`;
+                tb.appendChild(tr);
             }
         }
 
-        // Start animation loop
-        requestAnimationFrame(animate);
-    </script>
-</body>
-</html>
-"""
+        async function refreshFiles(){ 
+            try{ renderFiles((await api("/api/files")).files); }
+            catch{ document.getElementById("filesBody").innerHTML = `<tr><td colspan="4">Error listing files.</td></tr>`; } 
+        }
+
+        async function downloadFile(nameEnc){
+            const res = await fetch(`${API_BASE}/api/files/download/${nameEnc}?_ts=${Date.now()}`, {headers:{"X-API-Token":TOKEN}, cache:"no-store"});
+            if (!res.ok) return alert("Download failed.");
+            const blob = await res.blob(), a = document.createElement("a");
+            a.href = URL.createObjectURL(blob); a.download = decodeURIComponent(nameEnc);
+            document.body.appendChild(a); a.click(); a.remove();
+        }
+
+        async function deleteFile(nameEnc){
+            const name = decodeURIComponent(nameEnc);
+            if (!confirm(`Delete ${name}?`)) return;
+            try{ await api("/api/files/delete","POST",{name}); refreshFiles(); } catch{ alert("Delete failed."); }
+        }
+
+        async function refreshStatus(){
+            try{
+                const j = await api("/api/record/status");
+                const s = document.getElementById("statusText");
+                s.textContent = "Status: " + (j.active ? "RECORDING" : "IDLE");
+                s.style.color = j.active ? "#137a1d" : "#c21f1f";
+            }catch{ document.getElementById("statusText").textContent = "Status: error"; }
+        }
+
+        function startRecording() {
+            api("/api/record/start","POST")
+                .then(() => { setTimeout(refreshStatus, 500); })
+                .catch(()=>alert("Start failed"));
+        }
+
+        function stopRecording() {
+            api("/api/record/stop","POST")
+                .then(() => { setTimeout(refreshFiles, 1000); setTimeout(refreshStatus, 500); })
+                .catch(()=>alert("Stop failed"));
+        }
+
+        document.getElementById('camStream').src = `http://${window.location.hostname}:8889/cam`;
+        refreshFiles();
+        refreshStatus();
+        setInterval(refreshStatus, 5000);
+
+                // Start animation loop
+                requestAnimationFrame(animate);
+            </script>
+        </body>
+        </html>
+        """
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051, debug=False)

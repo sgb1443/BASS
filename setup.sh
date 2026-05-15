@@ -33,7 +33,7 @@ Description=BASS Web App
 After=network.target mediamtx.service
 
 [Service]
-ExecStart=/usr/bin/python3 $REPO_DIR/cam_web/app.py
+ExecStart=/usr/bin/python3 $REPO_DIR/my_app.py
 WorkingDirectory=$REPO_DIR
 Restart=always
 User=$USERNAME
