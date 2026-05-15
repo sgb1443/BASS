@@ -613,9 +613,8 @@ pathDefaults:
 # It's possible to use regular expressions by using a tilde as prefix,
 # for example "~^(test1|test2)$" will match both "test1" and "test2",
 
-
 paths:
   cam:
-    runOnInit: /usr/local/bin/start-camera.sh
+    runOnInit: /home/robot/BASS/start-camera.sh
     runOnInitRestart: yes
   all_others:
