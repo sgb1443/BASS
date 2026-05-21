@@ -29,45 +29,46 @@ telemetry_data = {
     "imu2": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "accX": 0.0, "accY": 0.0, "accZ": 0.0, "gyrX": 0.0, "gyrY": 0.0, "gyrZ": 0.0, "magX": 0.0, "magY": 0.0, "magZ": 0.0, "temp": 0.0},
     "bend": {"sensor1": 512, "sensor2": 512},
     "battery": {"voltage": "N/A", "percent": "N/A"},
-    "servos": {"servo1_pos": 90, "servo2_pos": 90}
+    "servos": {"servo1_pos": 90, "servo2_pos": 90, "servo3_pos": 90}
 }
 
 # --- ANGUILLIFORM KINEMATICS ---
 gait_params = {
-    'frequency': 1.0,     # f (or 1/T) in Hz
-    'wavelength': 1.0,    # lambda (normalized to Body Length L)
-    'amplitude': 45.0,    # Max tail angle in degrees
-    'gain': 2.0           # Hardware amplification multiplier
+    'frequency': 1.0,
+    'wavelength': 1.0,
+    'amplitude': 45.0,
+    'gain': 2.0
 }
 
 servo_params = {
-    'S1': {'enabled': True, 'channel': 0, 'center': 90, 'x_L': 0.3, 'gain': 1.0},
-    'S2': {'enabled': False, 'channel': 1, 'center': 90, 'x_L': 0.7, 'gain': 1.0}
+    'S1': {'enabled': False, 'channel': 0, 'center': 90, 'x_L': 0.3, 'gain': 1.0},
+    'S2': {'enabled': False, 'channel': 1, 'center': 90, 'x_L': 0.7, 'gain': 1.0},
+    'S3': {'enabled': False, 'channel': 2, 'center': 90, 'x_L': 1.0, 'gain': 1.0}
 }
 
 # --- DIRECT HARDWARE INITIALIZATION ---
 print("Initializing Hardware (Servos & Battery Only)...")
 i2c = busio.I2C(board.SCL, board.SDA)
 
-# 1. Servos on Driver Channel 0 and 1
 try:
     pca = adafruit_pca9685.PCA9685(i2c)
     pca.frequency = 50
     servo_0 = servo.Servo(pca.channels[0])
     servo_1 = servo.Servo(pca.channels[1])
+    servo_2 = servo.Servo(pca.channels[2])
     print("Servo driver online.")
 except Exception as e:
     print(f"Servo driver offline: {e}")
     servo_0 = None
     servo_1 = None
-    
-# 2. Waveshare UPS Battery Monitor (INA219)
+    servo_2 = None
+
 try:
     ina219 = INA219(i2c, addr=0x42)
     print("Battery monitor online.")
 except Exception:
     try:
-        ina219 = INA219(i2c, addr=0x43) # Auto-fallback for Waveshare boards
+        ina219 = INA219(i2c, addr=0x43)
         print("Battery monitor online.")
     except Exception as e:
         print(f"UPS Battery Monitor offline: {e}")
@@ -79,56 +80,46 @@ print("Hardware Ready. Starting server...")
 # --- REAL-TIME CONTROL & SENSOR LOOP ---
 def hardware_loop():
     start_time = time.time()
-    
+
     while True:
         elapsed = time.time() - start_time
 
-        # --- 1. Read Battery Voltage ---
         if ina219 is not None:
             try:
                 voltage = ina219.bus_voltage
                 percent = ((voltage - 3.2) / (4.2 - 3.2)) * 100
                 percent = max(0, min(100, percent))
-                
                 telemetry_data["battery"]["voltage"] = f"{voltage:.2f}"
                 telemetry_data["battery"]["percent"] = f"{int(percent)}"
             except Exception:
                 telemetry_data["battery"]["voltage"] = "N/A"
                 telemetry_data["battery"]["percent"] = "N/A"
 
-        # --- 2. Drive Servos via Anguilliform Equation ---
         f = gait_params['frequency']
         lam = gait_params['wavelength']
         A_max = gait_params['amplitude']
         gain = gait_params['gain']
-        
-        for target, srv in [('S1', servo_0), ('S2', servo_1)]:
+
+        for target, srv in [('S1', servo_0), ('S2', servo_1), ('S3', servo_2)]:
             if srv is not None:
                 params = servo_params[target]
                 if params['enabled']:
                     x_L = params['x_L']
-                    
-                    # Amplitude envelope a(x)
                     env_val = 0.351 * math.sin(x_L - 1.796) + 0.359
-                    amplitude_multiplier = env_val / 0.10972 
+                    amplitude_multiplier = env_val / 0.10972
                     s_gain = params.get('gain', 1.0)
                     amp = A_max * amplitude_multiplier * gain * s_gain
-                    
-                    # Traveling wave phase
                     phase = 2 * math.pi * ((x_L / lam) - (elapsed * f))
-                    
-                    # Output angle mapping
                     angle = params['center'] + (amp * math.sin(phase))
-                    angle = max(0, min(180, angle)) # Clamp bounds securely
-                    
-                    telemetry_data["servos"][f"{target.lower()}_pos"] = angle
-                    
+                    angle = max(0, min(180, angle))
+                    idx = int(servo_params[target]['channel']) + 1
+                    telemetry_data["servos"][f"servo{idx}_pos"] = angle
                     try:
                         srv.angle = angle
                     except Exception:
                         pass
-                    
-        time.sleep(0.02) # 50Hz loop
+
+        time.sleep(0.02)
 
 # Start hardware thread
 thread = threading.Thread(target=hardware_loop, daemon=True)
@@ -147,7 +138,7 @@ def get_telemetry():
 def send_command():
     data = request.json
     command = data.get('command')
-    
+
     if command == 'UPDATE_GAIT':
         gait_params['amplitude'] = float(data['amplitude'])
         gait_params['frequency'] = float(data['frequency'])
@@ -155,13 +146,13 @@ def send_command():
         if 'gain' in data:
             gait_params['gain'] = float(data['gain'])
         return jsonify({"status": "success"})
-        
+
     elif command == 'UPDATE_SERVO_POS':
         target = data.get('target')
         if target in servo_params:
             servo_params[target]['x_L'] = float(data['x_L'])
             return jsonify({"status": "success"})
-            
+
     elif command == 'UPDATE_SERVO_GAIN':
         target = data.get('target')
         if target in servo_params:
@@ -169,34 +160,33 @@ def send_command():
             return jsonify({"status": "success"})
 
     elif command == 'CENTER_ALL':
-        # Disable the wave logic and force servos to their center position
         for target in servo_params:
             servo_params[target]['enabled'] = False
-            
         try:
             if servo_0 is not None: servo_0.angle = servo_params['S1']['center']
             if servo_1 is not None: servo_1.angle = servo_params['S2']['center']
+            if servo_2 is not None: servo_2.angle = servo_params['S3']['center']
         except Exception:
             pass
         return jsonify({"status": "success"})
-            
+
     elif command == 'TOGGLE_POWER':
         target = data.get('target')
         if target in servo_params:
             is_on = (data['state'] == 'ON')
             servo_params[target]['enabled'] = is_on
-            
             if not is_on:
-                # Return to center position when powered off
                 try:
                     if target == 'S1' and servo_0 is not None:
                         servo_0.angle = servo_params[target]['center']
                     if target == 'S2' and servo_1 is not None:
                         servo_1.angle = servo_params[target]['center']
+                    if target == 'S3' and servo_2 is not None:
+                        servo_2.angle = servo_params[target]['center']
                 except Exception:
                     pass
             return jsonify({"status": "success"})
-            
+
     return jsonify({"status": "error", "message": "Unknown command"}), 400
 
 @app.route('/api/record/status')
@@ -255,21 +245,15 @@ HTML_TEMPLATE = """
 <head>
     <title>Telemetry</title>
     <style>
-        /* MATLAB Light Mode Aesthetic */
         body { font-family: Arial, sans-serif; background-color: #FFFFFF; color: #000000; margin: 0; padding: 20px; }
         h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #D0D0D0; padding-bottom: 10px; margin-bottom: 20px; }
         h2 { font-size: 16px; font-weight: bold; background-color: #F0F0F0; padding: 5px 10px; border: 1px solid #D0D0D0; margin-top: 0; }
-        
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .card { border: 1px solid #D0D0D0; padding: 15px; background-color: #FAFAFA; }
-        
-        /* Data Tables */
         table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-family: 'Courier New', Courier, monospace; font-size: 14px; }
         th, td { border: 1px solid #D0D0D0; padding: 4px 8px; text-align: right; }
         th { background-color: #E8E8E8; text-align: center; }
         .row-label { font-family: Arial, sans-serif; font-weight: bold; text-align: left; background-color: #F8F8F8;}
-        
-        /* 3D Cubes */
         .scene-container { display: flex; justify-content: space-around; margin-bottom: 20px; }
         .scene { width: 100px; height: 100px; perspective: 400px; }
         .cube { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transform: translateZ(-50px); }
@@ -280,31 +264,22 @@ HTML_TEMPLATE = """
         .cube__face--left   { transform: rotateY(-90deg) translateZ(50px); }
         .cube__face--top    { transform: rotateX( 90deg) translateZ(50px); }
         .cube__face--bottom { transform: rotateX(-90deg) translateZ(50px); }
-        
         .imu-label { text-align: center; font-weight: bold; margin-top: 5px; font-size: 12px; }
-
-        /* Compass */
         .compass-wrapper { display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
         .compass-circle { width: 80px; height: 80px; border: 2px solid #000; border-radius: 50%; position: relative; background: #FFF; }
         .compass-circle::before { content: 'N'; position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: bold;}
         .compass-needle { width: 2px; height: 90%; background: linear-gradient(to bottom, #FF0000 50%, #000000 50%); position: absolute; top: 5%; left: calc(50% - 1px); transform-origin: center; transition: transform 0.1s linear;}
-
-        /* Camera Box */
         .camera-placeholder { background-color: #1a1a1a; width: 100%; height: 240px; display: flex; align-items: center; justify-content: center; border: 1px solid #A0A0A0; margin-bottom: 25px; box-shadow: inset 0 0 10px #000; }
         .camera-text { color: #ff4444; font-family: 'Courier New', Courier, monospace; font-size: 16px; font-weight: bold; letter-spacing: 2px; }
-
-        /* Controls */
         .control-group { margin-bottom: 20px; border: 1px solid #E0E0E0; padding: 10px; background: #FFF; }
         button { border: 1px solid #A0A0A0; padding: 5px 15px; cursor: pointer; background-color: #E8E8E8; font-size: 14px; font-family: Arial; }
         button:hover { background-color: #D8D8D8; }
         .btn-on { background-color: #D0FFD0; border-color: #00A000; }
         .btn-off { background-color: #FFD0D0; border-color: #A00000; }
-        
         .slider-row { display: flex; align-items: center; margin: 10px 0; font-size: 14px; }
         .slider-row label { width: 130px; }
         input[type=range] { flex-grow: 1; margin: 0 10px; }
         .val-display { width: 35px; text-align: right; font-family: monospace; }
-        
         canvas { background-color: #FFF; border: 1px solid #D0D0D0; display: block; margin: 10px 0; width: 100%; height: 100px; }
     </style>
 </head>
@@ -314,11 +289,10 @@ HTML_TEMPLATE = """
     </div>
 
     <h1>Telemetry (Servos Only)</h1>
-    
+
     <div class="grid">
         <div class="card">
             <h2>IMU Telemetry & Orientation</h2>
-            
             <div class="scene-container">
                 <div>
                     <div class="scene">
@@ -436,7 +410,7 @@ HTML_TEMPLATE = """
             </div>
 
             <h3 style="font-size:14px; margin-bottom:5px; border-bottom: 1px solid #CCC; padding-bottom:3px;">Actuator Configurations</h3>
-            
+
             <button onclick="centerAllServos()" style="width: 100%; border-color: #0000FF; color: #0000FF; font-weight: bold; margin-bottom: 15px; padding: 10px; background-color: #E8E8FF;">
                 Lock All Servos to Center (For Hardware Alignment)
             </button>
@@ -444,7 +418,7 @@ HTML_TEMPLATE = """
             <div class="control-group">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <strong>Servo 1 (Channel 0)</strong>
-                    <button id="s1_power_btn" class="btn-on" onclick="togglePower('S1')">Power: ON</button>
+                    <button id="s1_power_btn" class="btn-off" onclick="togglePower('S1')">Power: OFF</button>
                 </div>
                 <div class="slider-row">
                     <label>Body Position (x/L)</label>
@@ -475,26 +449,40 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
+            <div class="control-group">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong>Servo 3 (Channel 2)</strong>
+                    <button id="s3_power_btn" class="btn-off" onclick="togglePower('S3')">Power: OFF</button>
+                </div>
+                <div class="slider-row">
+                    <label>Body Position (x/L)</label>
+                    <input type="range" id="s3_pos" min="0" max="1" step="0.05" value="1.0" oninput="updateServoPos('S3', this.value)">
+                    <span class="val-display" id="s3_pos_val">1.00</span>
+                </div>
+                <div class="slider-row">
+                    <label>Servo Gain</label>
+                    <input type="range" id="s3_gain" min="0.1" max="5.0" step="0.1" value="1.0" oninput="updateServoGain('S3', this.value)">
+                    <span class="val-display" id="s3_gain_val">1.0</span>
+                </div>
+            </div>
+
             <h3 style="font-size:14px; margin-bottom:5px; border-bottom: 1px solid #CCC; padding-bottom:3px;">PWM Signal (50Hz / 20ms Period)</h3>
-            <canvas id="pwmCanvas" style="height: 100px;"></canvas>
+            <canvas id="pwmCanvas" style="height: 120px;"></canvas>
         </div>
     </div>
 
     <script>
-        let servosEnabled = { 'S1': true, 'S2': false };
+        let servosEnabled = { 'S1': false, 'S2': false, 'S3': false };
         let latestData = null;
         let accelHistory = [];
-        
-        // Variables for bend sensor calibration
         let b1_center = 512;
         let b2_center = 512;
 
-        // Fetch data at 10Hz
         setInterval(() => {
             fetch('/api/telemetry')
                 .then(response => response.json())
-                .then(data => { 
-                    latestData = data; 
+                .then(data => {
+                    latestData = data;
                     accelHistory.push({
                         x1: data.imu1.accX, y1: data.imu1.accY, z1: data.imu1.accZ,
                         x2: data.imu2.accX, y2: data.imu2.accY, z2: data.imu2.accZ
@@ -503,7 +491,6 @@ HTML_TEMPLATE = """
                 });
         }, 100);
 
-        // Update readable text tables at 2Hz
         setInterval(() => {
             if(!latestData) return;
             document.getElementById('t1_ax').innerText = latestData.imu1.accX.toFixed(1);
@@ -518,8 +505,6 @@ HTML_TEMPLATE = """
             document.getElementById('t1_temp').innerText = latestData.imu1.temp.toFixed(1);
             document.getElementById('b1_val').innerText = latestData.bend.sensor1;
             document.getElementById('b2_val').innerText = latestData.bend.sensor2;
-            
-            // Update Battery
             if (latestData.battery.voltage === "N/A") {
                 document.getElementById('batt_display').innerText = "Data Not Available";
                 document.getElementById('batt_display').style.color = "#A00000";
@@ -529,72 +514,54 @@ HTML_TEMPLATE = """
             }
         }, 500);
 
-        // 60FPS Animation Loop for visual elements
         function animate() {
-            let timeVar = performance.now() / 1000; // Accurate seconds for the wave eq
-
+            let timeVar = performance.now() / 1000;
             if (latestData) {
-                // Orient Cubes
                 document.getElementById('cube1').style.transform = `translateZ(-50px) rotateX(${-latestData.imu1.pitch}deg) rotateY(${latestData.imu1.yaw}deg) rotateZ(${latestData.imu1.roll}deg)`;
-                
                 let magHeading = Math.atan2(latestData.imu1.magY, latestData.imu1.magX) * (180 / Math.PI);
-                let displayHeading = (magHeading + 360) % 360; // Convert to standard 0-360 range
-                
+                let displayHeading = (magHeading + 360) % 360;
                 document.getElementById('mag_needle').style.transform = `rotate(${magHeading + 90}deg)`;
                 document.getElementById('heading_val').innerText = displayHeading.toFixed(1);
-                
                 drawBendAnimation(latestData.bend.sensor1, latestData.bend.sensor2);
                 drawAccelTrace();
             }
-
-            // Draw Mathematical Body Wave
             drawBodyWave(timeVar);
-            
-            // Draw PWM Signals
             drawPWM();
-
             requestAnimationFrame(animate);
         }
-        
+
         function tareBend() {
             if(latestData) {
                 b1_center = latestData.bend.sensor1;
                 b2_center = latestData.bend.sensor2;
             }
         }
-        
+
         function drawBendAnimation(b1, b2) {
             const cvs = document.getElementById('bendCanvas');
             cvs.width = cvs.clientWidth; cvs.height = cvs.clientHeight;
             const ctx = cvs.getContext('2d');
-            
             ctx.strokeStyle = '#E0E0E0'; ctx.lineWidth = 1;
             for(let i=0; i<cvs.width; i+=20) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,cvs.height); ctx.stroke(); }
             for(let i=0; i<cvs.height; i+=20) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(cvs.width,i); ctx.stroke(); }
-
             let diff1 = b1 - b1_center;
             let diff2 = b2 - b2_center;
             let sensPos = parseFloat(document.getElementById('sens_pos').value);
             let sensNeg = parseFloat(document.getElementById('sens_neg').value);
-
             let sens1 = (diff1 > 0) ? sensPos : sensNeg;
             let sens2 = (diff2 > 0) ? sensPos : sensNeg;
-
-            let a1 = (diff1 / sens1) * (Math.PI / 3); 
-            let a2 = (diff2 / sens2) * (Math.PI / 3); 
+            let a1 = (diff1 / sens1) * (Math.PI / 3);
+            let a2 = (diff2 / sens2) * (Math.PI / 3);
             a1 = Math.max(-Math.PI/3, Math.min(Math.PI/3, a1));
             a2 = Math.max(-Math.PI/3, Math.min(Math.PI/3, a2));
-
             let sX = cvs.width * 0.1; let sY = cvs.height / 2; let seg = cvs.width * 0.35;
             let x1 = sX + seg * Math.cos(a1); let y1 = sY + seg * Math.sin(a1);
             let x2 = x1 + seg * Math.cos(a1+a2); let y2 = y1 + seg * Math.sin(a1+a2);
-
             ctx.strokeStyle = '#0000FF'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            ctx.beginPath(); ctx.moveTo(sX, sY); 
+            ctx.beginPath(); ctx.moveTo(sX, sY);
             ctx.bezierCurveTo(sX + seg * 0.5, sY, x1 - seg * 0.5 * Math.cos(a1), y1 - seg * 0.5 * Math.sin(a1), x1, y1);
             ctx.bezierCurveTo(x1 + seg * 0.5 * Math.cos(a1), y1 + seg * 0.5 * Math.sin(a1), x2 - seg * 0.5 * Math.cos(a1+a2), y2 - seg * 0.5 * Math.sin(a1+a2), x2, y2);
             ctx.stroke();
-            
             ctx.fillStyle = '#FF0000';
             ctx.beginPath(); ctx.arc(sX, sY, 5, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(x1, y1, 5, 0, Math.PI*2); ctx.fill();
@@ -605,20 +572,15 @@ HTML_TEMPLATE = """
             const cvs = document.getElementById('accelCanvas');
             cvs.width = cvs.clientWidth; cvs.height = cvs.clientHeight;
             const ctx = cvs.getContext('2d');
-
             ctx.strokeStyle = '#E0E0E0'; ctx.lineWidth = 1;
             for(let i=0; i<cvs.width; i+=20) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,cvs.height); ctx.stroke(); }
             for(let i=0; i<cvs.height; i+=20) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(cvs.width,i); ctx.stroke(); }
-            
             let midY = cvs.height / 2;
             ctx.strokeStyle = '#A0A0A0'; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(cvs.width, midY); ctx.stroke();
-
             if (accelHistory.length < 2) return;
-
-            const maxG = 10.0; 
+            const maxG = 10.0;
             const stepX = cvs.width / 100;
-
             const drawLine = (axis, color, isDashed) => {
                 ctx.strokeStyle = color; ctx.lineWidth = 2;
                 if (isDashed) ctx.setLineDash([5, 5]); else ctx.setLineDash([]);
@@ -630,36 +592,27 @@ HTML_TEMPLATE = """
                 ctx.stroke();
                 ctx.setLineDash([]);
             };
-
-            drawLine('x1', '#FF0000', false); drawLine('y1', '#00A000', false); drawLine('z1', '#0000FF', false); 
-            drawLine('x2', '#FF8888', true); drawLine('y2', '#33CC33', true); drawLine('z2', '#8888FF', true); 
+            drawLine('x1', '#FF0000', false); drawLine('y1', '#00A000', false); drawLine('z1', '#0000FF', false);
+            drawLine('x2', '#FF8888', true); drawLine('y2', '#33CC33', true); drawLine('z2', '#8888FF', true);
         }
 
         function drawBodyWave(timeVar) {
             const cvs = document.getElementById('bodyWaveCanvas');
             cvs.width = cvs.clientWidth; cvs.height = cvs.clientHeight;
             const ctx = cvs.getContext('2d');
-
-            // Draw Background Grid
             ctx.strokeStyle = '#E0E0E0'; ctx.lineWidth = 1;
             for(let i=0; i<cvs.width; i+=20) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,cvs.height); ctx.stroke(); }
             for(let i=0; i<cvs.height; i+=20) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(cvs.width,i); ctx.stroke(); }
-            
             let midY = cvs.height / 2;
             ctx.strokeStyle = '#A0A0A0'; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(cvs.width, midY); ctx.stroke();
-
             let f = parseFloat(document.getElementById('gait_freq').value);
             let lam = parseFloat(document.getElementById('gait_lam').value);
             let maxVisScale = cvs.height / 2.5;
-
-            // Amplitude Envelope Function a(x)
             const getEnvMultiplier = (x_L) => {
                 let val = 0.351 * Math.sin(x_L - 1.796) + 0.359;
-                return (val / 0.10972); 
+                return (val / 0.10972);
             };
-
-            // Draw Envelope Guides
             ctx.strokeStyle = '#FFBBBB'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
             ctx.beginPath();
             for(let x = 0; x <= cvs.width; x+=5) {
@@ -674,100 +627,87 @@ HTML_TEMPLATE = """
             }
             ctx.stroke();
             ctx.setLineDash([]);
-
-            // Draw Active Traveling Wave
             ctx.strokeStyle = '#0000FF'; ctx.lineWidth = 3;
             ctx.beginPath();
             for(let x = 0; x <= cvs.width; x+=2) {
                 let x_L = x / cvs.width;
                 let M = getEnvMultiplier(x_L);
                 let phase = 2 * Math.PI * ((x_L / lam) - (timeVar * f));
-                let y = midY - (M * Math.sin(phase) * maxVisScale); 
+                let y = midY - (M * Math.sin(phase) * maxVisScale);
                 if(x===0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.stroke();
-
-            // Draw Servo Trackers
             let s1_xL = parseFloat(document.getElementById('s1_pos').value);
             let s2_xL = parseFloat(document.getElementById('s2_pos').value);
-
+            let s3_xL = parseFloat(document.getElementById('s3_pos').value);
             const drawTracker = (x_L, color, isEnabled) => {
                 if(!isEnabled) return;
                 let x = x_L * cvs.width;
                 let phase = 2 * Math.PI * ((x_L / lam) - (timeVar * f));
                 let y = midY - (getEnvMultiplier(x_L) * Math.sin(phase) * maxVisScale);
-
                 ctx.fillStyle = color;
                 ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
             };
-
-            drawTracker(s1_xL, '#00FF00', servosEnabled['S1']); // Green dot
-            drawTracker(s2_xL, '#FF8800', servosEnabled['S2']); // Orange dot
+            drawTracker(s1_xL, '#00FF00', servosEnabled['S1']);
+            drawTracker(s2_xL, '#FF8800', servosEnabled['S2']);
+            drawTracker(s3_xL, '#FF00FF', servosEnabled['S3']);
         }
 
         function drawPWM() {
             const cvs = document.getElementById('pwmCanvas');
             cvs.width = cvs.clientWidth; cvs.height = cvs.clientHeight;
             const ctx = cvs.getContext('2d');
-
-            // Draw 20ms timeline grid
             ctx.strokeStyle = '#E0E0E0'; ctx.lineWidth = 1;
-            let msStep = cvs.width / 20; 
-            for(let i=0; i<=20; i++) { 
-                ctx.beginPath(); ctx.moveTo(i*msStep, 0); ctx.lineTo(i*msStep, cvs.height); ctx.stroke(); 
+            let msStep = cvs.width / 20;
+            for(let i=0; i<=20; i++) {
+                ctx.beginPath(); ctx.moveTo(i*msStep, 0); ctx.lineTo(i*msStep, cvs.height); ctx.stroke();
             }
-
             if(!latestData) return;
-
             let a1 = latestData.servos.servo1_pos;
             let a2 = latestData.servos.servo2_pos;
-
-            // Calculate pulse width in ms (Default adafruit servo limits: 0.75ms to 2.25ms)
-            let pw1 = servosEnabled['S1'] ? 0.75 + (a1 / 180) * 1.5 : 0; 
-            let pw2 = servosEnabled['S2'] ? 0.75 + (a2 / 180) * 1.5 : 0; 
-
+            let a3 = latestData.servos.servo3_pos;
+            let pw1 = servosEnabled['S1'] ? 0.75 + (a1 / 180) * 1.5 : 0;
+            let pw2 = servosEnabled['S2'] ? 0.75 + (a2 / 180) * 1.5 : 0;
+            let pw3 = servosEnabled['S3'] ? 0.75 + (a3 / 180) * 1.5 : 0;
             const drawWave = (pw, color, yOffset, label) => {
                 let dutyX = (pw / 20.0) * cvs.width;
                 let yHigh = yOffset;
                 let yLow = yOffset + 25;
-
                 ctx.strokeStyle = color; ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(0, yLow);
-                
                 if (pw > 0) {
                     ctx.lineTo(0, yHigh);
                     ctx.lineTo(dutyX, yHigh);
                     ctx.lineTo(dutyX, yLow);
                 }
-                
                 ctx.lineTo(cvs.width, yLow);
                 ctx.stroke();
-
                 ctx.fillStyle = color; ctx.font = '11px monospace';
                 ctx.fillText(`${label}: ${pw > 0 ? pw.toFixed(2) + 'ms' : 'OFF'}`, 5, yHigh - 5);
             };
-
-            drawWave(pw1, '#00A000', 20, 'S1');
-            drawWave(pw2, '#FF8800', 65, 'S2');
+            drawWave(pw1, '#00A000', 10, 'S1');
+            drawWave(pw2, '#FF8800', 43, 'S2');
+            drawWave(pw3, '#CC00CC', 76, 'S3');
         }
 
-        // --- COMMANDS ---
         function centerAllServos() {
-            // Update the UI switches to visually show the power is cut to the wave generator
-            if (servosEnabled['S1']) { 
-                servosEnabled['S1'] = false; 
-                document.getElementById('s1_power_btn').innerText = 'Power: OFF'; 
-                document.getElementById('s1_power_btn').className = 'btn-off'; 
+            if (servosEnabled['S1']) {
+                servosEnabled['S1'] = false;
+                document.getElementById('s1_power_btn').innerText = 'Power: OFF';
+                document.getElementById('s1_power_btn').className = 'btn-off';
             }
-            if (servosEnabled['S2']) { 
-                servosEnabled['S2'] = false; 
-                document.getElementById('s2_power_btn').innerText = 'Power: OFF'; 
-                document.getElementById('s2_power_btn').className = 'btn-off'; 
+            if (servosEnabled['S2']) {
+                servosEnabled['S2'] = false;
+                document.getElementById('s2_power_btn').innerText = 'Power: OFF';
+                document.getElementById('s2_power_btn').className = 'btn-off';
             }
-            
-            // Send the center command to the backend
+            if (servosEnabled['S3']) {
+                servosEnabled['S3'] = false;
+                document.getElementById('s3_power_btn').innerText = 'Power: OFF';
+                document.getElementById('s3_power_btn').className = 'btn-off';
+            }
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -780,10 +720,8 @@ HTML_TEMPLATE = """
             let state = servosEnabled[target] ? 'ON' : 'OFF';
             let prefix = target.toLowerCase();
             let btn = document.getElementById(`${prefix}_power_btn`);
-            
             btn.innerText = `Power: ${state}`;
             btn.className = servosEnabled[target] ? 'btn-on' : 'btn-off';
-            
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -796,12 +734,10 @@ HTML_TEMPLATE = """
             let freq = document.getElementById('gait_freq').value;
             let lam = document.getElementById('gait_lam').value;
             let gain = document.getElementById('gait_gain').value;
-
             document.getElementById('gait_amp_val').innerText = amp;
             document.getElementById('gait_freq_val').innerText = parseFloat(freq).toFixed(1);
             document.getElementById('gait_lam_val').innerText = parseFloat(lam).toFixed(1);
             document.getElementById('gait_gain_val').innerText = parseFloat(gain).toFixed(1);
-
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -812,7 +748,6 @@ HTML_TEMPLATE = """
         function updateServoPos(target, val) {
             let prefix = target.toLowerCase();
             document.getElementById(`${prefix}_pos_val`).innerText = parseFloat(val).toFixed(2);
-
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -823,7 +758,6 @@ HTML_TEMPLATE = """
         function updateServoGain(target, val) {
             let prefix = target.toLowerCase();
             document.getElementById(`${prefix}_gain_val`).innerText = parseFloat(val).toFixed(1);
-
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -831,7 +765,6 @@ HTML_TEMPLATE = """
             });
         }
 
-        // --- CAMERA FUNCTIONS ---
         let isRecording = false;
         const API_BASE = window.location.origin;
         const TOKEN = "super-secret-token";
@@ -862,9 +795,9 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function refreshFiles(){ 
+        async function refreshFiles(){
             try{ renderFiles((await api("/api/files")).files); }
-            catch{ document.getElementById("filesBody").innerHTML = `<tr><td colspan="4">Error listing files.</td></tr>`; } 
+            catch{ document.getElementById("filesBody").innerHTML = `<tr><td colspan="4">Error listing files.</td></tr>`; }
         }
 
         async function downloadFile(nameEnc){
@@ -907,12 +840,11 @@ HTML_TEMPLATE = """
         refreshStatus();
         setInterval(refreshStatus, 5000);
 
-                // Start animation loop
-                requestAnimationFrame(animate);
-            </script>
-        </body>
-        </html>
-        """
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>
+"""
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051, debug=False)
