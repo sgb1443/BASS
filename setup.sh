@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # BASS Setup Script
 # Run this once after cloning the repo to configure the systemd service
 
