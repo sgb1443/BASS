@@ -50,39 +50,48 @@ servo_params = {
 print("Initializing Hardware (Servos & Battery Only)...")
 i2c = busio.I2C(board.SCL, board.SDA)
 
-try:
-    pca = adafruit_pca9685.PCA9685(i2c)
-    pca.frequency = 50
-    servo_0 = servo.Servo(pca.channels[0])
-    servo_1 = servo.Servo(pca.channels[1])
-    servo_2 = servo.Servo(pca.channels[2])
-    print("Servo driver online.")
-except Exception as e:
-    print(f"Servo driver offline: {e}")
-    servo_0 = None
-    servo_1 = None
-    servo_2 = None
+pca = None
+servo_0 = servo_1 = servo_2 = None
 
-try:
-    ina219 = INA219(i2c, addr=0x42)
-    print("Battery monitor online.")
-except Exception:
-    try:
-        ina219 = INA219(i2c, addr=0x43)
-        print("Battery monitor online.")
-    except Exception as e:
-        print(f"UPS Battery Monitor offline: {e}")
-        ina219 = None
+ina219 = None
 
 print("Hardware Ready. Starting server...")
 
 
 # --- REAL-TIME CONTROL & SENSOR LOOP ---
 def hardware_loop():
+    global pca, servo_0, servo_1, servo_2, ina219
     start_time = time.time()
 
     while True:
         elapsed = time.time() - start_time
+
+        if servo_0 is None:
+            try:
+                while not i2c.try_lock():
+                    pass
+                i2c.unlock()
+                pca = adafruit_pca9685.PCA9685(i2c)
+                pca.frequency = 50
+                servo_0 = servo.Servo(pca.channels[0], min_pulse=750, max_pulse=2250)
+                servo_1 = servo.Servo(pca.channels[1], min_pulse=750, max_pulse=2250)
+                servo_2 = servo.Servo(pca.channels[2], min_pulse=750, max_pulse=2250)
+                print("Servo driver online.")
+            except Exception as e:
+                print(f"Servo driver not ready, retrying in 5s: {e}")
+                time.sleep(5)
+                continue
+
+        if ina219 is None:
+            try:
+                ina219 = INA219(i2c, addr=0x42)
+                print("Battery monitor online.")
+            except Exception:
+                try:
+                    ina219 = INA219(i2c, addr=0x43)
+                    print("Battery monitor online.")
+                except Exception:
+                    pass
 
         if ina219 is not None:
             try:

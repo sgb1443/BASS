@@ -62,10 +62,11 @@ Description=BASS Web App
 After=network.target mediamtx.service
 
 [Service]
+ExecStartPre=/bin/sleep 5
 ExecStart=/usr/bin/python3 $REPO_DIR/my_app.py
 WorkingDirectory=$REPO_DIR
 Restart=always
-RestartSec=3
+RestartSec=5
 User=$USERNAME
 
 [Install]
